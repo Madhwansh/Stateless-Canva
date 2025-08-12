@@ -12,250 +12,378 @@ import {
 } from "firebase/firestore";
 import Toolbar from "../components/Toolbar.jsx";
 
-/**
- * CanvasScreen renders the collaborative drawing surface for a given scene ID.
- * Fabric.js for objects; Firestore for realtime sync; local undo/redo.
- * Fixes:
- *  - Monotonic rev-based syncing (no stale overwrites)
- *  - Ignore our own writes (optimistic rev bump)
- *  - Debounced saves; guarded during remote apply
- */
 export default function CanvasScreen() {
   const { id } = useParams();
-  const canvasRef = useRef(null);
-  const fabricCanvasRef = useRef(null);
+
+  const canvasElRef = useRef(null);
+  const fabricRef = useRef(null);
   const containerRef = useRef(null);
 
   const [fillColor, setFillColor] = useState("#bfdfff");
   const [strokeColor, setStrokeColor] = useState("#222222");
   const [penMode, setPenMode] = useState(false);
 
-  // Realtime + history refs
+  // debounce & sync guards
   const saveTimerRef = useRef(null);
   const lastRevRef = useRef(0);
   const isApplyingRemoteRef = useRef(false);
+
   const undoStackRef = useRef([]);
   const redoStackRef = useRef([]);
 
+  // mark this browser tab
+  const clientIdRef = useRef(
+    (crypto?.randomUUID && crypto.randomUUID()) ||
+      Math.random().toString(36).slice(2)
+  );
+
+  const extraProps = [
+    "type",
+    "left",
+    "top",
+    "width",
+    "height",
+    "radius",
+    "angle",
+    "scaleX",
+    "scaleY",
+    "originX",
+    "originY",
+    "fill",
+    "stroke",
+    "strokeWidth",
+    "path",
+    "text",
+    "fontSize",
+    "fontFamily",
+    "fontWeight",
+    "fontStyle",
+    "underline",
+    "linethrough",
+    "charSpacing",
+  ];
+
+  const serializeObject = (c) => {
+    const json = c.toDatalessJSON(extraProps);
+    console.log("[serialize] objects:", json.objects?.length ?? 0);
+    return json;
+  };
+
+  const serializeString = (c) => JSON.stringify(serializeObject(c));
+
   useEffect(() => {
     if (!id) return;
-    const c = new fabric.Canvas(canvasRef.current, {
+
+    console.log("[init] scene:", id, "clientId:", clientIdRef.current);
+
+    const c = new fabric.Canvas(canvasElRef.current, {
       backgroundColor: "#ffffff",
       selection: true,
       preserveObjectStacking: true,
     });
-    fabricCanvasRef.current = c;
+    fabricRef.current = c;
 
-    // --- Full-viewport sizing from container ---
+    // full-viewport sizing
     const resizeToContainer = () => {
-      const width = containerRef.current?.clientWidth ?? window.innerWidth;
-      const height = containerRef.current?.clientHeight ?? window.innerHeight;
-      c.setDimensions({ width, height });
+      const w = containerRef.current?.clientWidth ?? window.innerWidth;
+      const h = containerRef.current?.clientHeight ?? window.innerHeight;
+      c.setDimensions({ width: w, height: h });
       c.requestRenderAll();
     };
     resizeToContainer();
-    const resizeObs = new ResizeObserver(resizeToContainer);
-    if (containerRef.current) resizeObs.observe(containerRef.current);
+    const ro = new ResizeObserver(resizeToContainer);
+    if (containerRef.current) ro.observe(containerRef.current);
     window.addEventListener("resize", resizeToContainer);
 
-    // --- Debounced save helper ---
-    const scheduleSave = (fn) => {
-      if (isApplyingRemoteRef.current) return; // never save while applying remote
+    const docRef = doc(db, "scenes", id);
+
+    // ---------- SAVE (debounced, ignore while remote is applying) ----------
+    const doSave = () => {
+      if (isApplyingRemoteRef.current) {
+        // don't queue while applying remote; it causes tail-chasing loops
+        console.log("[save] blocked (applying remote)");
+        return;
+      }
+      try {
+        const canvasStr = serializeString(c);
+        const width = c.getWidth();
+        const height = c.getHeight();
+        // optimistic local rev tick — only for local comparison
+        lastRevRef.current = (lastRevRef.current || 0) + 1;
+
+        console.log("[save] setDoc rev+1(localGuess):", lastRevRef.current);
+        setDoc(
+          docRef,
+          {
+            canvasStr,
+            width,
+            height,
+            updatedAt: serverTimestamp(),
+            lastEditor: clientIdRef.current, // mark this write as ours
+            rev: increment(1),
+          },
+          { merge: true }
+        )
+          .then(() => {
+            console.log("[save] success");
+          })
+          .catch((e) => {
+            console.error("[save] Firestore error:", e);
+          });
+      } catch (e) {
+        console.error("[save] serialize error:", e);
+      }
+    };
+
+    const scheduleSave = (delay = 500) => {
+      if (isApplyingRemoteRef.current) {
+        // ignore schedules triggered during remote apply
+        return;
+      }
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-      // 300ms feels snappy for pen strokes; you can raise to ~500ms if you want fewer writes
-      saveTimerRef.current = setTimeout(() => fn(), 300);
+      saveTimerRef.current = setTimeout(doSave, delay);
     };
 
-    // --- History (skip during remote apply) ---
-    const recordHistory = () => {
-      if (isApplyingRemoteRef.current) return;
-      undoStackRef.current.push(c.toJSON());
-      if (undoStackRef.current.length > 50) undoStackRef.current.shift();
-      redoStackRef.current = [];
+    const clearScheduledSave = () => {
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
     };
 
-    // Reflect selection colors into the pickers
-    const updateSelection = (e) => {
-      const obj = e.selected ? e.selected[0] : null;
+    const flushPending = () => {
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
+      doSave();
+    };
+
+    window.addEventListener("beforeunload", flushPending);
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden") flushPending();
+    });
+
+    // ---------- selection + history ----------
+    const onSelection = (e) => {
+      const obj = e.selected?.[0] ?? null;
       if (obj) {
         if (obj.fill) setFillColor(obj.fill);
         if (obj.stroke) setStrokeColor(obj.stroke);
       }
     };
+    c.on("selection:created", onSelection);
+    c.on("selection:updated", onSelection);
 
-    c.on("selection:created", updateSelection);
-    c.on("selection:updated", updateSelection);
+    const recordHistory = () => {
+      if (isApplyingRemoteRef.current) return;
+      undoStackRef.current.push(serializeObject(c));
+      if (undoStackRef.current.length > 50) undoStackRef.current.shift();
+      redoStackRef.current = [];
+    };
     c.on("object:added", recordHistory);
     c.on("object:modified", recordHistory);
     c.on("object:removed", recordHistory);
 
-    const docRef = doc(db, "scenes", id);
-
-    // --- Save (optimistic rev bump so our own snapshot won’t reload) ---
-    const saveCanvas = () => {
-      if (isApplyingRemoteRef.current) return;
-      const json = c.toJSON();
-
-      // Bump local rev optimistically; snapshot with same rev won't be "newer"
-      lastRevRef.current = (lastRevRef.current || 0) + 1;
-
-      setDoc(
-        docRef,
-        {
-          canvas: json,
-          width: c.getWidth(),
-          height: c.getHeight(),
-          updatedAt: serverTimestamp(),
-          rev: increment(1),
-        },
-        { merge: true }
-      ).catch((err) => console.error("Error saving canvas:", err));
+    // ---------- local change → debounced save (but NOT during remote apply) ----------
+    const onLocalChange = () => {
+      if (isApplyingRemoteRef.current) {
+        // Ignore — these changes are coming from loadFromJSON
+        // This is the big one that prevents endless save loops.
+        // console.log("[localChange] ignored (remote apply)");
+        return;
+      }
+      // console.log("[localChange] scheduled");
+      scheduleSave(600);
     };
+    c.on("object:added", onLocalChange);
+    c.on("object:modified", onLocalChange);
+    c.on("object:removed", onLocalChange);
 
-    // Persist (debounced) on local edits
-    const persistIfLocal = () => scheduleSave(saveCanvas);
-
-    c.on("object:added", persistIfLocal);
-    c.on("object:modified", persistIfLocal);
-    c.on("object:removed", persistIfLocal);
-
-    // IMPORTANT: pen strokes come via 'path:created' once per stroke
-    c.on("path:created", () => scheduleSave(saveCanvas));
-
-    // --- Initial load (also sets rev) ---
-    getDoc(docRef).then((snap) => {
-      // Compute baseline size
-      let width = containerRef.current?.clientWidth ?? window.innerWidth;
-      let height = containerRef.current?.clientHeight ?? window.innerHeight;
-
-      if (snap.exists()) {
-        const data = snap.data();
-        if (data?.width) width = data.width;
-        if (data?.height) height = data.height;
-
-        c.setDimensions({ width, height });
-        c.setBackgroundColor("#ffffff", c.renderAll.bind(c));
-
-        if (data?.canvas) {
-          isApplyingRemoteRef.current = true;
-          c.loadFromJSON(data.canvas, () => {
-            c.requestRenderAll();
-            lastRevRef.current = Number(data.rev || 0);
-            setTimeout(() => (isApplyingRemoteRef.current = false), 0);
-          });
-        } else {
-          // create first state
-          setDoc(docRef, {
-            canvas: c.toJSON(),
-            width,
-            height,
-            updatedAt: serverTimestamp(),
-            rev: 1,
-          }).catch((err) => console.error("Error creating canvas:", err));
-          lastRevRef.current = 1;
-        }
-      } else {
-        // no doc yet
-        c.setDimensions({ width, height });
-        setDoc(docRef, {
-          canvas: c.toJSON(),
-          width,
-          height,
-          updatedAt: serverTimestamp(),
-          rev: 1,
-        }).catch((err) => console.error("Error creating canvas:", err));
-        lastRevRef.current = 1;
+    // ---------- pen: save once at stroke end ----------
+    c.on("mouse:up", () => {
+      if (c.isDrawingMode) {
+        // trailing-only save; no immediate leading call
+        scheduleSave(400);
       }
     });
 
-    // --- Realtime sync: apply only strictly newer revisions ---
+    // ---------- initial load ----------
+    getDoc(docRef).then((snap) => {
+      let w = containerRef.current?.clientWidth ?? window.innerWidth;
+      let h = containerRef.current?.clientHeight ?? window.innerHeight;
+
+      if (snap.exists()) {
+        const data = snap.data();
+        if (data?.width) w = data.width;
+        if (data?.height) h = data.height;
+
+        c.setDimensions({ width: w, height: h });
+        c.setBackgroundColor("#ffffff", c.renderAll.bind(c));
+
+        const canvasStr = data?.canvasStr;
+        const canvasObj = data?.canvas; // legacy
+
+        if (canvasStr) {
+          isApplyingRemoteRef.current = true;
+          clearScheduledSave();
+          c.loadFromJSON(JSON.parse(canvasStr), () => {
+            c.requestRenderAll();
+            lastRevRef.current = Number(data.rev || 0);
+            isApplyingRemoteRef.current = false;
+            console.log("[initLoad] loaded string rev:", lastRevRef.current);
+          });
+        } else if (canvasObj) {
+          isApplyingRemoteRef.current = true;
+          clearScheduledSave();
+          c.loadFromJSON(canvasObj, () => {
+            c.requestRenderAll();
+            lastRevRef.current = Number(data.rev || 0);
+            isApplyingRemoteRef.current = false;
+            console.log("[initLoad] loaded object rev:", lastRevRef.current);
+          });
+        } else {
+          setDoc(docRef, {
+            canvasStr: serializeString(c),
+            width: w,
+            height: h,
+            updatedAt: serverTimestamp(),
+            lastEditor: clientIdRef.current,
+            rev: 1,
+          });
+          lastRevRef.current = 1;
+          console.log("[initLoad] created empty doc rev: 1");
+        }
+      } else {
+        c.setDimensions({ width: w, height: h });
+        setDoc(docRef, {
+          canvasStr: serializeString(c),
+          width: w,
+          height: h,
+          updatedAt: serverTimestamp(),
+          lastEditor: clientIdRef.current,
+          rev: 1,
+        });
+        lastRevRef.current = 1;
+        console.log("[initLoad] created new doc rev: 1");
+      }
+    });
+
+    // ---------- realtime ----------
     const unsub = onSnapshot(docRef, (snap) => {
       if (!snap.exists()) return;
       const data = snap.data();
-      const rev = Number(data.rev || 0);
 
+      // Ignore our own commits completely — prevents replay → save loops
+      if (data.lastEditor === clientIdRef.current) {
+        // console.log("[snapshot] own write ignored");
+        return;
+      }
+
+      const rev = Number(data.rev || 0);
+      // console.log("[snapshot] got rev", rev, "local rev", lastRevRef.current);
       if (rev > lastRevRef.current) {
         lastRevRef.current = rev;
         isApplyingRemoteRef.current = true;
-        c.loadFromJSON(data.canvas, () => {
-          // also apply remote width/height if present
+        clearScheduledSave();
+
+        const payload = data.canvasStr
+          ? JSON.parse(data.canvasStr)
+          : data.canvas;
+
+        c.loadFromJSON(payload, () => {
           if (data.width && data.height) {
             c.setDimensions({ width: data.width, height: data.height });
           }
           c.requestRenderAll();
-          setTimeout(() => (isApplyingRemoteRef.current = false), 0);
+          isApplyingRemoteRef.current = false;
+          console.log("[snapshot] applied remote rev:", rev);
         });
       }
     });
 
-    // Cleanup
+    // cleanup
     return () => {
       unsub();
       window.removeEventListener("resize", resizeToContainer);
-      if (containerRef.current) resizeObs.disconnect();
+      window.removeEventListener("beforeunload", flushPending);
+      document.removeEventListener("visibilitychange", flushPending);
+      if (containerRef.current) ro.disconnect();
       c.dispose();
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      clearScheduledSave();
     };
   }, [id]);
 
-  // ---------- Tooling ----------
+  // ---------- Tools ----------
+  const exitPenIfOn = () => {
+    const c = fabricRef.current;
+    if (c.isDrawingMode) {
+      c.isDrawingMode = false;
+      setPenMode(false);
+    }
+  };
+
   const addRect = () => {
-    const c = fabricCanvasRef.current;
-    const rect = new fabric.Rect({
-      left: 50,
-      top: 50,
-      width: 120,
-      height: 80,
-      fill: fillColor,
-      stroke: strokeColor,
-      strokeWidth: 1,
-    });
-    c.add(rect);
-    c.setActiveObject(rect);
+    const c = fabricRef.current;
+    exitPenIfOn();
+    c.add(
+      new fabric.Rect({
+        left: 50,
+        top: 50,
+        width: 120,
+        height: 80,
+        fill: fillColor,
+        stroke: strokeColor,
+        strokeWidth: 1,
+      })
+    );
     c.requestRenderAll();
   };
 
   const addCircle = () => {
-    const c = fabricCanvasRef.current;
-    const circle = new fabric.Circle({
-      left: 100,
-      top: 100,
-      radius: 50,
-      fill: fillColor,
-      stroke: strokeColor,
-      strokeWidth: 1,
-    });
-    c.add(circle);
-    c.setActiveObject(circle);
+    const c = fabricRef.current;
+    exitPenIfOn();
+    c.add(
+      new fabric.Circle({
+        left: 100,
+        top: 100,
+        radius: 50,
+        fill: fillColor,
+        stroke: strokeColor,
+        strokeWidth: 1,
+      })
+    );
     c.requestRenderAll();
   };
 
   const addText = () => {
-    const c = fabricCanvasRef.current;
-    const textbox = new fabric.Textbox("Double-click to edit", {
-      left: 150,
-      top: 150,
-      fontSize: 24,
-      fill: strokeColor,
-    });
-    c.add(textbox);
-    c.setActiveObject(textbox);
+    const c = fabricRef.current;
+    exitPenIfOn();
+    c.add(
+      new fabric.Textbox("Double-click to edit", {
+        left: 150,
+        top: 150,
+        fontSize: 24,
+        fill: strokeColor,
+      })
+    );
     c.requestRenderAll();
   };
 
   const togglePen = () => {
-    const c = fabricCanvasRef.current;
-    const newMode = !c.isDrawingMode;
-    c.isDrawingMode = newMode;
-    setPenMode(newMode);
-    if (newMode) {
+    const c = fabricRef.current;
+    const on = !c.isDrawingMode;
+    c.isDrawingMode = on;
+    setPenMode(on);
+    if (on) {
+      if (!c.freeDrawingBrush) c.freeDrawingBrush = new fabric.PencilBrush(c);
       c.freeDrawingBrush.color = strokeColor;
       c.freeDrawingBrush.width = 2;
     }
   };
 
   const deleteSelected = () => {
-    const c = fabricCanvasRef.current;
+    const c = fabricRef.current;
     const obj = c.getActiveObject();
     if (obj) {
       c.remove(obj);
@@ -264,28 +392,29 @@ export default function CanvasScreen() {
     }
   };
 
-  const handleFillChange = (e) => {
+  const onFillChange = (e) => {
     const color = e.target.value;
     setFillColor(color);
-    const c = fabricCanvasRef.current;
+    const c = fabricRef.current;
     const obj = c.getActiveObject();
     if (obj && obj.fill !== undefined) {
       obj.set("fill", color);
       c.requestRenderAll();
     }
-    if (c.isDrawingMode) c.freeDrawingBrush.color = color;
   };
 
-  const handleStrokeChange = (e) => {
+  const onStrokeChange = (e) => {
     const color = e.target.value;
     setStrokeColor(color);
-    const c = fabricCanvasRef.current;
+    const c = fabricRef.current;
     const obj = c.getActiveObject();
     if (obj && obj.stroke !== undefined) {
       obj.set("stroke", color);
       c.requestRenderAll();
     }
-    if (c.isDrawingMode) c.freeDrawingBrush.color = color;
+    if (c.isDrawingMode && c.freeDrawingBrush) {
+      c.freeDrawingBrush.color = color;
+    }
   };
 
   const shareCanvas = () => {
@@ -301,40 +430,40 @@ export default function CanvasScreen() {
   };
 
   const exportPNG = () => {
-    const c = fabricCanvasRef.current;
+    const c = fabricRef.current;
     const dataURL = c.toDataURL({ format: "png" });
-    const link = document.createElement("a");
-    link.href = dataURL;
-    link.download = `canvas-${id}.png`;
-    link.click();
+    const a = document.createElement("a");
+    a.href = dataURL;
+    a.download = `canvas-${id}.png`;
+    a.click();
   };
 
   const exportSVG = () => {
-    const c = fabricCanvasRef.current;
-    const svgData = c.toSVG();
-    const blob = new Blob([svgData], { type: "image/svg+xml" });
+    const c = fabricRef.current;
+    const svg = c.toSVG();
+    const blob = new Blob([svg], { type: "image/svg+xml" });
     const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `canvas-${id}.svg`;
-    link.click();
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `canvas-${id}.svg`;
+    a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
   const undo = () => {
-    const c = fabricCanvasRef.current;
+    const c = fabricRef.current;
     if (undoStackRef.current.length > 0) {
       const prev = undoStackRef.current.pop();
-      redoStackRef.current.push(c.toJSON());
+      redoStackRef.current.push(serializeObject(c));
       c.loadFromJSON(prev, c.renderAll.bind(c));
     }
   };
 
   const redo = () => {
-    const c = fabricCanvasRef.current;
+    const c = fabricRef.current;
     if (redoStackRef.current.length > 0) {
       const next = redoStackRef.current.pop();
-      undoStackRef.current.push(c.toJSON());
+      undoStackRef.current.push(serializeObject(c));
       c.loadFromJSON(next, c.renderAll.bind(c));
     }
   };
@@ -354,17 +483,12 @@ export default function CanvasScreen() {
         shareCanvas={shareCanvas}
         fillColor={fillColor}
         strokeColor={strokeColor}
-        onFillChange={handleFillChange}
-        onStrokeChange={handleStrokeChange}
+        onFillChange={onFillChange}
+        onStrokeChange={onStrokeChange}
         penMode={penMode}
       />
-      <div
-        ref={containerRef}
-        className="flex-1 overflow-hidden"
-        // If your Dock overlaps, optionally add padding-bottom here to keep a safe area:
-        // style={{ paddingBottom: 112 }}
-      >
-        <canvas ref={canvasRef} className="block" />
+      <div ref={containerRef} className="flex-1 overflow-hidden">
+        <canvas ref={canvasElRef} className="block" />
       </div>
     </div>
   );
