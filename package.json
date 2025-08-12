@@ -1,0 +1,25 @@
+{
+  "name": "vite-canvas-app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A shareable canvas editor built with React, Vite, Tailwind CSS, Fabric.js and Firebase Firestore.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "firebase": "^9.23.0",
+    "fabric": "^5.3.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-router-dom": "^6.11.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.0.0",
+    "autoprefixer": "^10.4.14",
+    "postcss": "^8.4.14",
+    "tailwindcss": "^3.4.1",
+    "vite": "^5.2.0"
+  }
+}
