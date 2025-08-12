@@ -1,11 +1,20 @@
-import React from 'react';
+import React from "react";
+import Dock from "./Dock";
+import {
+  Square,
+  Circle,
+  Type,
+  Pencil,
+  Trash2,
+  Undo2,
+  Redo2,
+  ImageDown,
+  FileDown,
+  Share2,
+  Droplet,
+  Palette,
+} from "lucide-react";
 
-/**
- * Stateless toolbar component for the canvas editor. It exposes actions
- * through props and uses Tailwind utility classes for styling. The
- * `penMode` prop toggles an active style on the pen button when free
- * drawing mode is enabled.
- */
 export default function Toolbar({
   addRect,
   addCircle,
@@ -21,36 +30,106 @@ export default function Toolbar({
   strokeColor,
   onFillChange,
   onStrokeChange,
-  penMode
+  penMode,
 }) {
-  // Utility classes reused on buttons for a consistent look
-  const baseButton = 'px-3 py-2 rounded text-white bg-blue-500 hover:bg-blue-600 transition-colors';
-  const activeButton = 'bg-blue-700';
+  const items = [
+    {
+      label: "Rectangle",
+      icon: <Square size={20} className="text-black/90" />,
+      onClick: addRect,
+    },
+    {
+      label: "Circle",
+      icon: <Circle size={20} className="text-black/90" />,
+      onClick: addCircle,
+    },
+    {
+      label: "Text",
+      icon: <Type size={20} className="text-black/90" />,
+      onClick: addText,
+    },
+
+    {
+      label: "Pen",
+      icon: <Pencil size={20} className="text-black/90" />,
+      onClick: togglePen,
+      className: penMode ? "ring-2 ring-white/60" : "",
+    },
+
+    // Color pickers: icon + transparent color input overlay
+    {
+      label: "Fill",
+      icon: (
+        <div className="relative flex items-center justify-center">
+          <Droplet size={20} className="text-black/90" />
+          <input
+            aria-label="Fill color"
+            type="color"
+            value={fillColor}
+            onChange={onFillChange}
+            className="absolute inset-0 opacity-0 cursor-pointer"
+          />
+        </div>
+      ),
+    },
+    {
+      label: "Stroke",
+      icon: (
+        <div className="relative flex items-center justify-center">
+          <Palette size={20} className="text-black/90" />
+          <input
+            aria-label="Stroke color"
+            type="color"
+            value={strokeColor}
+            onChange={onStrokeChange}
+            className="absolute inset-0 opacity-0 cursor-pointer"
+          />
+        </div>
+      ),
+    },
+
+    {
+      label: "Delete",
+      icon: <Trash2 size={20} className="text-black/90" />,
+      onClick: deleteSelected,
+    },
+    {
+      label: "Undo",
+      icon: <Undo2 size={20} className="text-black/90" />,
+      onClick: undo,
+    },
+    {
+      label: "Redo",
+      icon: <Redo2 size={20} className="text-black/90" />,
+      onClick: redo,
+    },
+
+    {
+      label: "Export PNG",
+      icon: <ImageDown size={20} className="text-black/90" />,
+      onClick: exportPNG,
+    },
+    {
+      label: "Export SVG",
+      icon: <FileDown size={20} className="text-black/90" />,
+      onClick: exportSVG,
+    },
+    {
+      label: "Share",
+      icon: <Share2 size={20} className="text-black/90" />,
+      onClick: shareCanvas,
+    },
+  ];
+
   return (
-    <div className="toolbar flex flex-wrap items-center gap-2 p-3 bg-white shadow sticky top-0 z-10">
-      <button onClick={addRect} className={baseButton}>Rectangle</button>
-      <button onClick={addCircle} className={baseButton}>Circle</button>
-      <button onClick={addText} className={baseButton}>Text</button>
-      <button
-        onClick={togglePen}
-        className={`${baseButton} ${penMode ? activeButton : ''}`}
-      >
-        {penMode ? 'Pen (On)' : 'Pen'}
-      </button>
-      <label className="flex items-center gap-1 text-sm text-gray-700">
-        Fill
-        <input type="color" value={fillColor} onChange={onFillChange} className="w-6 h-6 p-0 border-0" />
-      </label>
-      <label className="flex items-center gap-1 text-sm text-gray-700">
-        Stroke
-        <input type="color" value={strokeColor} onChange={onStrokeChange} className="w-6 h-6 p-0 border-0" />
-      </label>
-      <button onClick={deleteSelected} className={baseButton}>Delete</button>
-      <button onClick={undo} className={baseButton}>Undo</button>
-      <button onClick={redo} className={baseButton}>Redo</button>
-      <button onClick={exportPNG} className={baseButton}>Export PNG</button>
-      <button onClick={exportSVG} className={baseButton}>Export SVG</button>
-      <button onClick={shareCanvas} className={baseButton}>Share</button>
-    </div>
+    <Dock
+      items={items}
+      panelHeight={64}
+      dockHeight={220}
+      baseItemSize={44}
+      magnification={72} // how big icons grow on hover
+      distance={180} // hover influence range
+      className="select-none"
+    />
   );
 }

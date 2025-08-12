@@ -1,15 +1,15 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { useParams } from 'react-router-dom';
-import { fabric } from 'fabric';
-import { db } from '../config/firestore.js';
+import React, { useState, useEffect, useRef } from "react";
+import { useParams } from "react-router-dom";
+import { fabric } from "fabric";
+import { db } from "../config/firestore.js";
 import {
   doc,
   getDoc,
   setDoc,
   onSnapshot,
-  serverTimestamp
-} from 'firebase/firestore';
-import Toolbar from '../components/Toolbar.jsx';
+  serverTimestamp,
+} from "firebase/firestore";
+import Toolbar from "../components/Toolbar.jsx";
 
 /**
  * CanvasScreen renders the collaborative drawing surface for a given scene ID.
@@ -20,8 +20,8 @@ export default function CanvasScreen() {
   const { id } = useParams();
   const canvasRef = useRef(null);
   const fabricCanvasRef = useRef(null);
-  const [fillColor, setFillColor] = useState('#bfdfff');
-  const [strokeColor, setStrokeColor] = useState('#222222');
+  const [fillColor, setFillColor] = useState("#bfdfff");
+  const [strokeColor, setStrokeColor] = useState("#222222");
   const [penMode, setPenMode] = useState(false);
   const saveTimeoutRef = useRef(null);
   const lastRemoteUpdateTimeRef = useRef(null);
@@ -33,8 +33,8 @@ export default function CanvasScreen() {
     const fabricCanvas = new fabric.Canvas(canvasRef.current, {
       width: 1000,
       height: 600,
-      backgroundColor: '#ffffff',
-      selection: true
+      backgroundColor: "#ffffff",
+      selection: true,
     });
     fabricCanvasRef.current = fabricCanvas;
 
@@ -52,30 +52,30 @@ export default function CanvasScreen() {
       }
     };
     // attach events
-    fabricCanvas.on('selection:created', updateSelection);
-    fabricCanvas.on('selection:updated', updateSelection);
-    fabricCanvas.on('object:added', scheduleSave);
-    fabricCanvas.on('object:modified', scheduleSave);
-    fabricCanvas.on('object:removed', scheduleSave);
-    fabricCanvas.on('path:created', scheduleSave);
+    fabricCanvas.on("selection:created", updateSelection);
+    fabricCanvas.on("selection:updated", updateSelection);
+    fabricCanvas.on("object:added", scheduleSave);
+    fabricCanvas.on("object:modified", scheduleSave);
+    fabricCanvas.on("object:removed", scheduleSave);
+    fabricCanvas.on("path:created", scheduleSave);
     const recordHistory = () => {
       undoStackRef.current.push(fabricCanvas.toJSON());
       if (undoStackRef.current.length > 50) undoStackRef.current.shift();
       redoStackRef.current = [];
     };
-    fabricCanvas.on('object:added', recordHistory);
-    fabricCanvas.on('object:modified', recordHistory);
-    fabricCanvas.on('object:removed', recordHistory);
+    fabricCanvas.on("object:added", recordHistory);
+    fabricCanvas.on("object:modified", recordHistory);
+    fabricCanvas.on("object:removed", recordHistory);
     // Firestore doc reference
-    const docRef = doc(db, 'scenes', id);
+    const docRef = doc(db, "scenes", id);
     // Save canvas state
     const saveCanvas = () => {
       const json = fabricCanvas.toJSON();
       setDoc(docRef, {
         canvas: json,
-        updatedAt: serverTimestamp()
+        updatedAt: serverTimestamp(),
       }).catch((err) => {
-        console.error('Error saving canvas:', err);
+        console.error("Error saving canvas:", err);
       });
     };
     // Load state
@@ -100,7 +100,10 @@ export default function CanvasScreen() {
       const data = snapshot.data();
       if (!data || !data.updatedAt) return;
       const remoteTime = data.updatedAt.toMillis();
-      if (!lastRemoteUpdateTimeRef.current || remoteTime > lastRemoteUpdateTimeRef.current) {
+      if (
+        !lastRemoteUpdateTimeRef.current ||
+        remoteTime > lastRemoteUpdateTimeRef.current
+      ) {
         lastRemoteUpdateTimeRef.current = remoteTime;
         fabricCanvas.loadFromJSON(data.canvas).then(() => {
           fabricCanvas.requestRenderAll();
@@ -123,7 +126,7 @@ export default function CanvasScreen() {
       height: 80,
       fill: fillColor,
       stroke: strokeColor,
-      strokeWidth: 1
+      strokeWidth: 1,
     });
     const c = fabricCanvasRef.current;
     c.add(rect);
@@ -137,7 +140,7 @@ export default function CanvasScreen() {
       radius: 50,
       fill: fillColor,
       stroke: strokeColor,
-      strokeWidth: 1
+      strokeWidth: 1,
     });
     const c = fabricCanvasRef.current;
     c.add(circle);
@@ -145,11 +148,11 @@ export default function CanvasScreen() {
     c.requestRenderAll();
   };
   const addText = () => {
-    const textbox = new fabric.Textbox('Double‑click to edit', {
+    const textbox = new fabric.Textbox("Double‑click to edit", {
       left: 150,
       top: 150,
       fontSize: 24,
-      fill: strokeColor
+      fill: strokeColor,
     });
     const c = fabricCanvasRef.current;
     c.add(textbox);
@@ -181,7 +184,7 @@ export default function CanvasScreen() {
     const c = fabricCanvasRef.current;
     const obj = c.getActiveObject();
     if (obj && obj.fill !== undefined) {
-      obj.set('fill', color);
+      obj.set("fill", color);
       c.requestRenderAll();
     }
   };
@@ -191,7 +194,7 @@ export default function CanvasScreen() {
     const c = fabricCanvasRef.current;
     const obj = c.getActiveObject();
     if (obj && obj.stroke !== undefined) {
-      obj.set('stroke', color);
+      obj.set("stroke", color);
       c.requestRenderAll();
     }
     if (c.isDrawingMode) {
@@ -201,19 +204,22 @@ export default function CanvasScreen() {
   const shareCanvas = () => {
     const url = window.location.href;
     if (navigator.clipboard) {
-      navigator.clipboard.writeText(url).then(() => {
-        alert('Shareable link copied to your clipboard.');
-      }).catch(() => {
-        prompt('Copy this link to share your canvas:', url);
-      });
+      navigator.clipboard
+        .writeText(url)
+        .then(() => {
+          alert("Shareable link copied to your clipboard.");
+        })
+        .catch(() => {
+          prompt("Copy this link to share your canvas:", url);
+        });
     } else {
-      prompt('Copy this link to share your canvas:', url);
+      prompt("Copy this link to share your canvas:", url);
     }
   };
   const exportPNG = () => {
     const c = fabricCanvasRef.current;
-    const dataURL = c.toDataURL({ format: 'png' });
-    const link = document.createElement('a');
+    const dataURL = c.toDataURL({ format: "png" });
+    const link = document.createElement("a");
     link.href = dataURL;
     link.download = `canvas-${id}.png`;
     link.click();
@@ -221,9 +227,9 @@ export default function CanvasScreen() {
   const exportSVG = () => {
     const c = fabricCanvasRef.current;
     const svgData = c.toSVG();
-    const blob = new Blob([svgData], { type: 'image/svg+xml' });
+    const blob = new Blob([svgData], { type: "image/svg+xml" });
     const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
+    const link = document.createElement("a");
     link.href = url;
     link.download = `canvas-${id}.svg`;
     link.click();
