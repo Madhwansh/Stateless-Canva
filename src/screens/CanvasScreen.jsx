@@ -23,13 +23,18 @@ export default function CanvasScreen() {
   const [strokeColor, setStrokeColor] = useState("#222222");
   const [penMode, setPenMode] = useState(false);
 
-  // debounce & sync guards
+  // sync/debounce guards
   const saveTimerRef = useRef(null);
   const lastRevRef = useRef(0);
   const isApplyingRemoteRef = useRef(false);
 
+  // history
   const undoStackRef = useRef([]);
   const redoStackRef = useRef([]);
+
+  // expose save functions to undo/redo
+  const doSaveRef = useRef(() => {});
+  const scheduleSaveRef = useRef((_) => {});
 
   // mark this browser tab
   const clientIdRef = useRef(
@@ -37,6 +42,7 @@ export default function CanvasScreen() {
       Math.random().toString(36).slice(2)
   );
 
+  // include "path" so Pencil/free-draw strokes persist
   const extraProps = [
     "type",
     "left",
@@ -63,18 +69,11 @@ export default function CanvasScreen() {
     "charSpacing",
   ];
 
-  const serializeObject = (c) => {
-    const json = c.toDatalessJSON(extraProps);
-    console.log("[serialize] objects:", json.objects?.length ?? 0);
-    return json;
-  };
-
+  const serializeObject = (c) => c.toDatalessJSON(extraProps);
   const serializeString = (c) => JSON.stringify(serializeObject(c));
 
   useEffect(() => {
     if (!id) return;
-
-    console.log("[init] scene:", id, "clientId:", clientIdRef.current);
 
     const c = new fabric.Canvas(canvasElRef.current, {
       backgroundColor: "#ffffff",
@@ -98,10 +97,16 @@ export default function CanvasScreen() {
     const docRef = doc(db, "scenes", id);
 
     // ---------- SAVE (debounced, ignore while remote is applying) ----------
+    const clearScheduledSave = () => {
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
+    };
+
     const doSave = () => {
       if (isApplyingRemoteRef.current) {
-        // don't queue while applying remote; it causes tail-chasing loops
-        console.log("[save] blocked (applying remote)");
+        // ignore saves while applying remote state
         return;
       }
       try {
@@ -111,51 +116,37 @@ export default function CanvasScreen() {
         // optimistic local rev tick — only for local comparison
         lastRevRef.current = (lastRevRef.current || 0) + 1;
 
-        console.log("[save] setDoc rev+1(localGuess):", lastRevRef.current);
         setDoc(
           docRef,
           {
-            canvasStr,
+            canvasStr, // store as string to avoid Firestore nested-array limits
             width,
             height,
             updatedAt: serverTimestamp(),
-            lastEditor: clientIdRef.current, // mark this write as ours
+            lastEditor: clientIdRef.current,
             rev: increment(1),
           },
           { merge: true }
-        )
-          .then(() => {
-            console.log("[save] success");
-          })
-          .catch((e) => {
-            console.error("[save] Firestore error:", e);
-          });
+        ).catch((e) => {
+          console.error("[save] Firestore error:", e);
+        });
       } catch (e) {
         console.error("[save] serialize error:", e);
       }
     };
 
-    const scheduleSave = (delay = 500) => {
-      if (isApplyingRemoteRef.current) {
-        // ignore schedules triggered during remote apply
-        return;
-      }
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    const scheduleSave = (delay = 600) => {
+      if (isApplyingRemoteRef.current) return; // never schedule from remote apply
+      clearScheduledSave();
       saveTimerRef.current = setTimeout(doSave, delay);
     };
 
-    const clearScheduledSave = () => {
-      if (saveTimerRef.current) {
-        clearTimeout(saveTimerRef.current);
-        saveTimerRef.current = null;
-      }
-    };
+    // expose to undo/redo
+    doSaveRef.current = doSave;
+    scheduleSaveRef.current = scheduleSave;
 
     const flushPending = () => {
-      if (saveTimerRef.current) {
-        clearTimeout(saveTimerRef.current);
-        saveTimerRef.current = null;
-      }
+      clearScheduledSave();
       doSave();
     };
 
@@ -175,37 +166,33 @@ export default function CanvasScreen() {
     c.on("selection:created", onSelection);
     c.on("selection:updated", onSelection);
 
-    const recordHistory = () => {
+    const pushSnapshot = () => {
       if (isApplyingRemoteRef.current) return;
-      undoStackRef.current.push(serializeObject(c));
-      if (undoStackRef.current.length > 50) undoStackRef.current.shift();
-      redoStackRef.current = [];
-    };
-    c.on("object:added", recordHistory);
-    c.on("object:modified", recordHistory);
-    c.on("object:removed", recordHistory);
-
-    // ---------- local change → debounced save (but NOT during remote apply) ----------
-    const onLocalChange = () => {
-      if (isApplyingRemoteRef.current) {
-        // Ignore — these changes are coming from loadFromJSON
-        // This is the big one that prevents endless save loops.
-        // console.log("[localChange] ignored (remote apply)");
-        return;
+      const snap = serializeObject(c);
+      const last = undoStackRef.current[undoStackRef.current.length - 1];
+      if (JSON.stringify(last) !== JSON.stringify(snap)) {
+        undoStackRef.current.push(snap);
+        if (undoStackRef.current.length > 50) undoStackRef.current.shift();
+        redoStackRef.current = [];
       }
-      // console.log("[localChange] scheduled");
+    };
+
+    c.on("object:added", pushSnapshot);
+    c.on("object:modified", pushSnapshot);
+    c.on("object:removed", pushSnapshot);
+
+    // local change → debounced save (but NOT during remote apply)
+    const onLocalChange = () => {
+      if (isApplyingRemoteRef.current) return;
       scheduleSave(600);
     };
     c.on("object:added", onLocalChange);
     c.on("object:modified", onLocalChange);
     c.on("object:removed", onLocalChange);
 
-    // ---------- pen: save once at stroke end ----------
+    // pen: save once at stroke end (nice trailing debounce)
     c.on("mouse:up", () => {
-      if (c.isDrawingMode) {
-        // trailing-only save; no immediate leading call
-        scheduleSave(400);
-      }
+      if (c.isDrawingMode) scheduleSave(400);
     });
 
     // ---------- initial load ----------
@@ -230,8 +217,10 @@ export default function CanvasScreen() {
           c.loadFromJSON(JSON.parse(canvasStr), () => {
             c.requestRenderAll();
             lastRevRef.current = Number(data.rev || 0);
+            // seed baseline history
+            undoStackRef.current = [serializeObject(c)];
+            redoStackRef.current = [];
             isApplyingRemoteRef.current = false;
-            console.log("[initLoad] loaded string rev:", lastRevRef.current);
           });
         } else if (canvasObj) {
           isApplyingRemoteRef.current = true;
@@ -239,12 +228,16 @@ export default function CanvasScreen() {
           c.loadFromJSON(canvasObj, () => {
             c.requestRenderAll();
             lastRevRef.current = Number(data.rev || 0);
+            // seed baseline history
+            undoStackRef.current = [serializeObject(c)];
+            redoStackRef.current = [];
             isApplyingRemoteRef.current = false;
-            console.log("[initLoad] loaded object rev:", lastRevRef.current);
           });
         } else {
+          // create empty doc and baseline
+          const baseStr = serializeString(c);
           setDoc(docRef, {
-            canvasStr: serializeString(c),
+            canvasStr: baseStr,
             width: w,
             height: h,
             updatedAt: serverTimestamp(),
@@ -252,12 +245,14 @@ export default function CanvasScreen() {
             rev: 1,
           });
           lastRevRef.current = 1;
-          console.log("[initLoad] created empty doc rev: 1");
+          undoStackRef.current = [JSON.parse(baseStr)];
+          redoStackRef.current = [];
         }
       } else {
         c.setDimensions({ width: w, height: h });
+        const baseStr = serializeString(c);
         setDoc(docRef, {
-          canvasStr: serializeString(c),
+          canvasStr: baseStr,
           width: w,
           height: h,
           updatedAt: serverTimestamp(),
@@ -265,7 +260,8 @@ export default function CanvasScreen() {
           rev: 1,
         });
         lastRevRef.current = 1;
-        console.log("[initLoad] created new doc rev: 1");
+        undoStackRef.current = [JSON.parse(baseStr)];
+        redoStackRef.current = [];
       }
     });
 
@@ -274,14 +270,10 @@ export default function CanvasScreen() {
       if (!snap.exists()) return;
       const data = snap.data();
 
-      // Ignore our own commits completely — prevents replay → save loops
-      if (data.lastEditor === clientIdRef.current) {
-        // console.log("[snapshot] own write ignored");
-        return;
-      }
+      // ignore our own commits — prevents replay→save loops
+      if (data.lastEditor === clientIdRef.current) return;
 
       const rev = Number(data.rev || 0);
-      // console.log("[snapshot] got rev", rev, "local rev", lastRevRef.current);
       if (rev > lastRevRef.current) {
         lastRevRef.current = rev;
         isApplyingRemoteRef.current = true;
@@ -296,8 +288,10 @@ export default function CanvasScreen() {
             c.setDimensions({ width: data.width, height: data.height });
           }
           c.requestRenderAll();
+          // update baseline so the next undo is from this state
+          undoStackRef.current = [serializeObject(c)];
+          redoStackRef.current = [];
           isApplyingRemoteRef.current = false;
-          console.log("[snapshot] applied remote rev:", rev);
         });
       }
     });
@@ -450,22 +444,48 @@ export default function CanvasScreen() {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
+  // ---------- Undo / Redo (guarded, no re-entrant history) ----------
   const undo = () => {
     const c = fabricRef.current;
-    if (undoStackRef.current.length > 0) {
-      const prev = undoStackRef.current.pop();
-      redoStackRef.current.push(serializeObject(c));
-      c.loadFromJSON(prev, c.renderAll.bind(c));
-    }
+    if (!c) return;
+    // Need at least baseline + current
+    if (undoStackRef.current.length <= 1) return;
+
+    const current = undoStackRef.current.pop();
+    const prev = undoStackRef.current[undoStackRef.current.length - 1];
+    redoStackRef.current.push(current);
+
+    isApplyingRemoteRef.current = true;
+    c.loadFromJSON(prev, () => {
+      c.requestRenderAll();
+      isApplyingRemoteRef.current = false;
+      // normalize top-of-stack to exactly what was applied
+      undoStackRef.current[undoStackRef.current.length - 1] =
+        serializeObject(c);
+      // optionally persist the undone state (debounced but safe)
+      scheduleSaveRef.current(500);
+    });
   };
 
   const redo = () => {
     const c = fabricRef.current;
-    if (redoStackRef.current.length > 0) {
-      const next = redoStackRef.current.pop();
-      undoStackRef.current.push(serializeObject(c));
-      c.loadFromJSON(next, c.renderAll.bind(c));
-    }
+    if (!c) return;
+    if (redoStackRef.current.length === 0) return;
+
+    const next = redoStackRef.current.pop();
+    // push immediately to history as the new current
+    undoStackRef.current.push(next);
+
+    isApplyingRemoteRef.current = true;
+    c.loadFromJSON(next, () => {
+      c.requestRenderAll();
+      isApplyingRemoteRef.current = false;
+      // normalize top-of-stack
+      undoStackRef.current[undoStackRef.current.length - 1] =
+        serializeObject(c);
+      // persist redone state
+      scheduleSaveRef.current(500);
+    });
   };
 
   return (
