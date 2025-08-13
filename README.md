@@ -57,7 +57,7 @@ The system automatically:
 ## Project structure
 
 ```
-vite-canvas-app/
+stateless-canva-app/
 ├── index.html              # HTML entry point used by Vite
 ├── package.json            # Project metadata, dependencies and scripts
 ├── postcss.config.js       # PostCSS configuration for Tailwind
@@ -84,7 +84,7 @@ vite-canvas-app/
 1. **Install dependencies** (requires Node.js and npm):
 
    ```bash
-   cd vite-canvas-app
+   cd stateless-canva-app
    npm install
    npm run dev
    ```
