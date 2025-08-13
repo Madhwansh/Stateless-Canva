@@ -1,14 +1,58 @@
-# Stateless-Canva
+# Collaborative Canvas with Real-Time User Presence
 
-This repository contains a Vite + React implementation of a shareable canvas editor. The application allows users to draw rectangles, circles and freeform paths, insert editable text, adjust colours, undo/redo actions, export the canvas and collaborate through a shared link. The state of each canvas is stored in Firebase Firestore; clients listen for real‑time updates via `onSnapshot()` and persist changes by writing serialised Fabric.js JSON using `set()`.
+## 📌 Overview
 
-## Features
+This project is a **real-time collaborative canvas** built using **React**, **Fabric.js**, and **Firebase Firestore**.  
+Multiple users can **draw, add shapes, and edit a shared canvas** simultaneously.  
+Each connected participant is represented by a **“Guest N”** identity with a unique color-coded live cursor.
 
-- **Modern tooling** – Built with [Vite](https://vitejs.dev/) for fast development builds and [Tailwind CSS](https://tailwindcss.com/) for styling.
-- **Real‑time collaboration** – Multiple users editing the same `/canvas/:id` route will see each other's changes instantly thanks to Firestore snapshots.
-- **Rich editing tools** – Add rectangles, circles, text boxes or draw freely with the pen tool. Modify object colours, move, resize and rotate objects.
-- **Undo/Redo & Export** – Navigate through a history of changes or export the canvas as PNG or SVG images.
-- **Shareable links** – The home route generates a new scene ID and redirects to `/canvas/:id`. Share the URL to collaborate with anyone.
+The system automatically:
+
+- Detects when a user **joins** the canvas and shows a **toast notification**.
+- Detects when a user **leaves** or closes their tab and shows a **toast notification**.
+- Syncs the canvas state in real-time across all connected clients.
+
+## ⚖️ Trade-offs & Design Decisions
+
+1. **No Authentication for Speed**
+
+   - Avoided user accounts to simplify the setup and speed up development.
+   - Used generated client IDs with auto-assigned `Guest N` labels.
+   - **Trade-off:** No real-world user identification and possible name collisions.
+
+2. **Optimized for Real-Time Presence First**
+
+   - Main focus was multi-user presence and live cursor updates.
+   - Deferred **Snap-to-Grid** and **alignment guides** for later development.
+
+3. **Undo/Redo with Local History**
+
+   - Undo/redo stacks are stored locally to avoid heavy Firestore writes.
+   - **Trade-off:** History does not persist after page refresh.
+
+4. **Firestore for State & Presence Sync**
+   - Firestore stores both the full canvas JSON and presence data.
+   - **Trade-off:** Large canvases can increase Firestore read/write costs.
+
+---
+
+## ✨ Bonus Features (Current & Planned)
+
+### ✅ Currently Implemented
+
+- **User Presence Tracking**
+  - Live connected user list with unique colors.
+  - Join/leave toast notifications.
+- **Real-Time Canvas Sync** between multiple clients.
+- **Basic Drawing Tools**: Rectangle, Circle, Text, Freehand Pen.
+- **Undo/Redo** (local session only).
+
+### 📅 Planned for Future Updates
+
+- **Snap-to-Grid** & **Smart Alignment Guides**.
+- **Persistent Undo/Redo Across Sessions**.
+- **Drawing Permissions** (viewer/editor roles).
+- **Authentication & Named Users**.
 
 ## Project structure
 
