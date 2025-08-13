@@ -110,12 +110,3 @@ vite-canvas-app/
 
 3. **Using the app** – Visit the root of the development server. You’ll be redirected to `/canvas/<generated-id>`. Use the toolbar to draw, edit and export your canvas. Click **Share** to copy the current URL to your clipboard.
 
-## Styling
-
-The interface is styled with Tailwind CSS utility classes. For example, the toolbar uses `flex`, `gap-2`, `bg-white`, `shadow`, `sticky` and other classes to achieve a clean responsive layout. Custom CSS is kept to a minimum; you can add global styles in `src/index.css` or extend Tailwind via `tailwind.config.js`.
-
-## Technical notes
-
-- Firestore listeners created with `onSnapshot()` fire immediately with the current document contents and then whenever the document changes. The app uses this mechanism to keep all clients in sync.
-- Fabric.js serialises the canvas with `toJSON()` and restores it with `loadFromJSON()`. These objects are saved as plain JSON documents in Firestore.
-- Undo/Redo stacks are stored in memory and capped at 50 states. Feel free to improve this for larger projects.
