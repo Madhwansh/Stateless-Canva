@@ -3,3 +3,6 @@
 @tailwind utilities;
 
 /* Additional global styles can be placed here if needed */
+body {
+  font-family: "Rubik", sans-serif;
+}

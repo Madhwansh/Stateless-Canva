@@ -51,7 +51,7 @@ function DockItem({
       onBlur={() => isHovered.set(0)}
       onClick={onClick}
       className={`relative inline-flex items-center justify-center rounded-2xl 
-                  bg-white/10 backdrop-blur-xl border border-white/20 shadow-md
+                  bg-[#610ef9]/60 backdrop-blur-xl border border-white/20 shadow-md
                   ${className}`}
       tabIndex={0}
       role="button"
@@ -120,7 +120,7 @@ export default function Dock({
         onMouseMove={({ pageX }) => mouseX.set(pageX)}
         onMouseLeave={() => mouseX.set(Infinity)}
         className={`pointer-events-auto mx-auto mb-3 flex w-fit items-end gap-4 
-                    rounded-2xl border border-white/20 bg-white/10 backdrop-blur-xl 
+                    rounded-2xl border border-white/20 bg-[#610ef9]/20 backdrop-blur-xl 
                     px-4 pb-2 shadow-[0_8px_30px_rgba(0,0,0,0.12)] ${className}`}
         style={{ height: panelHeight }}
         role="toolbar"

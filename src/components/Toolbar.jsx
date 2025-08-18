@@ -35,23 +35,23 @@ export default function Toolbar({
   const items = [
     {
       label: "Rectangle",
-      icon: <Square size={20} className="text-black/90" />,
+      icon: <Square size={20} className="text-white" />,
       onClick: addRect,
     },
     {
       label: "Circle",
-      icon: <Circle size={20} className="text-black/90" />,
+      icon: <Circle size={20} className="text-white" />,
       onClick: addCircle,
     },
     {
       label: "Text",
-      icon: <Type size={20} className="text-black/90" />,
+      icon: <Type size={20} className="text-white" />,
       onClick: addText,
     },
 
     {
       label: "Pen",
-      icon: <Pencil size={20} className="text-black/90" />,
+      icon: <Pencil size={20} className="text-white" />,
       onClick: togglePen,
       className: penMode ? "ring-2 ring-white/60" : "",
     },
@@ -61,7 +61,7 @@ export default function Toolbar({
       label: "Fill",
       icon: (
         <div className="relative flex items-center justify-center">
-          <Droplet size={20} className="text-black/90" />
+          <Droplet size={20} className="text-white" />
           <input
             aria-label="Fill color"
             type="color"
@@ -76,7 +76,7 @@ export default function Toolbar({
       label: "Stroke",
       icon: (
         <div className="relative flex items-center justify-center">
-          <Palette size={20} className="text-black/90" />
+          <Palette size={20} className="text-white" />
           <input
             aria-label="Stroke color"
             type="color"
@@ -90,33 +90,33 @@ export default function Toolbar({
 
     {
       label: "Delete",
-      icon: <Trash2 size={20} className="text-black/90" />,
+      icon: <Trash2 size={20} className="text-white" />,
       onClick: deleteSelected,
     },
     {
       label: "Undo",
-      icon: <Undo2 size={20} className="text-black/90" />,
+      icon: <Undo2 size={20} className="text-white" />,
       onClick: undo,
     },
     {
       label: "Redo",
-      icon: <Redo2 size={20} className="text-black/90" />,
+      icon: <Redo2 size={20} className="text-white" />,
       onClick: redo,
     },
 
     {
       label: "Export PNG",
-      icon: <ImageDown size={20} className="text-black/90" />,
+      icon: <ImageDown size={20} className="text-white" />,
       onClick: exportPNG,
     },
     {
       label: "Export SVG",
-      icon: <FileDown size={20} className="text-black/90" />,
+      icon: <FileDown size={20} className="text-white" />,
       onClick: exportSVG,
     },
     {
       label: "Share",
-      icon: <Share2 size={20} className="text-black/90" />,
+      icon: <Share2 size={20} className="text-white" />,
       onClick: shareCanvas,
     },
   ];

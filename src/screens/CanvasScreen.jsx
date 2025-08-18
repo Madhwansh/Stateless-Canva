@@ -1,4 +1,3 @@
-// screens/CanvasScreen.jsx
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { useParams } from "react-router-dom";
 import { fabric } from "fabric";
@@ -17,7 +16,7 @@ import {
 import Toolbar from "../components/Toolbar.jsx";
 import PresenceLayer from "../components/PresenceLayer.jsx";
 
-/* ------------------------------ Tiny Toasts ------------------------------ */
+/* ------------------------------ Custom Toasts ------------------------------ */
 function Toasts({ items }) {
   return (
     <div className="pointer-events-none fixed top-3 left-1/2 -translate-x-1/2 z-[60] flex flex-col gap-2">
@@ -57,7 +56,7 @@ export default function CanvasScreen() {
   const redoStackRef = useRef([]);
   const pushedOnThisGestureRef = useRef(false); // avoid double push on same drag
 
-  // ----- presence -----
+  // -----user presence -----
   const clientIdRef = useRef(
     (crypto?.randomUUID && crypto.randomUUID()) ||
       Math.random().toString(36).slice(2)
